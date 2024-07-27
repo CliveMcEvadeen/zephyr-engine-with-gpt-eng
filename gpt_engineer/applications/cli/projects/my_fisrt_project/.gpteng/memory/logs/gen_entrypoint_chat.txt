@@ -1,0 +1,165 @@
+
+2024-07-09T06:17:34.609788
+================================ System Message ================================
+
+You will get information about a codebase that is currently on disk in the current folder.
+The user will ask you to write a script that runs the code in a specific way.
+You will answer with code blocks that include all the necessary terminal commands.
+Do not install globally. Do not use sudo.
+Do not explain the code, just give the commands.
+Do not use placeholders, use example values (like . for a folder argument) if necessary.
+
+
+================================ Human Message =================================
+
+
+        Make a unix script that
+        a) installs dependencies
+        b) runs all necessary parts of the codebase (in parallel if necessary)
+        
+Information about the codebase:
+
+```
+File: src/main.py
+1 import argparse
+2 import logging
+3 from typing import Dict
+4 
+5 import mlflow
+6 
+7 from data_loader import load_data
+8 from model import train_model, evaluate_model
+9 
+10 # Configure logging
+11 logging.basicConfig(level=logging.INFO)
+12 
+13 def parse_arguments() -> Dict:
+14     """Parses command line arguments."""
+15     parser = argparse.ArgumentParser(description="Train and evaluate a machine learning model.")
+16     parser.add_argument("--data_path", type=str, required=True, help="Path to the training data.")
+17     parser.add_argument("--model_name", type=str, default="my_model", help="Name of the model.")
+18     parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs.")
+19     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training.")
+20     parser.add_argument("--learning_rate", type=float, default=0.001, help="Learning rate for the optimizer.")
+21     return vars(parser.parse_args())
+22 
+23 def main():
+24     """Main function to train and evaluate the model."""
+25     args = parse_arguments()
+26 
+27     # Start MLflow run
+28     with mlflow.start_run(run_name=args["model_name"]):
+29         # Log parameters
+30         mlflow.log_params(args)
+31 
+32         # Load data
+33         logging.info("Loading data...")
+34         train_data, val_data = load_data(args["data_path"])
+35 
+36         # Train model
+37         logging.info("Training model...")
+38         model = train_model(train_data, args["epochs"], args["batch_size"], args["learning_rate"])
+39 
+40         # Evaluate model
+41         logging.info("Evaluating model...")
+42         metrics = evaluate_model(model, val_data)
+43 
+44         # Log metrics
+45         mlflow.log_metrics(metrics)
+46 
+47         # Log model
+48         mlflow.sklearn.log_model(model, "model")
+49 
+50 if __name__ == "__main__":
+51     main()
+
+File: src/data_loader.py
+1 import logging
+2 from typing import Tuple
+3 
+4 import pandas as pd
+5 from sklearn.model_selection import train_test_split
+6 from sklearn.preprocessing import StandardScaler
+7 
+8 def load_data(data_path: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
+9     """Loads and preprocesses the data.
+10 
+11     Args:
+12         data_path (str): Path to the data file.
+13 
+14     Returns:
+15         Tuple[pd.DataFrame, pd.DataFrame]: A tuple containing the training and validation dataframes.
+16     """
+17     try:
+18         # Load data from CSV
+19         data = pd.read_csv(data_path)
+20 
+21         # Split into features and target
+22         X = data.drop("target_variable", axis=1)  # Replace "target_variable" with the actual target column name
+23         y = data["target_variable"]
+24 
+25         # Split into train and validation sets
+26         X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
+27 
+28         # Feature scaling
+29         scaler = StandardScaler()
+30         X_train = scaler.fit_transform(X_train)
+31         X_val = scaler.transform(X_val)
+32 
+33         return (X_train, y_train), (X_val, y_val)
+34     except Exception as e:
+35         logging.error(f"Error loading data: {e}")
+36         raise
+
+File: src/model.py
+1 from typing import Dict
+2 
+3 from sklearn.linear_model import LogisticRegression
+4 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+5 
+6 def train_model(X_train, y_train, epochs: int, batch_size: int, learning_rate: float):
+7     """Trains a logistic regression model.
+8 
+9     Args:
+10         X_train: Training data features.
+11         y_train: Training data labels.
+12         epochs (int): Number of training epochs.
+13         batch_size (int): Batch size for training.
+14         learning_rate (float): Learning rate for the optimizer.
+15 
+16     Returns:
+17         LogisticRegression: The trained logistic regression model.
+18     """
+19     model = LogisticRegression()
+20     model.fit(X_train, y_train)
+21     return model
+22 
+23 def evaluate_model(model: LogisticRegression, X_val, y_val) -> Dict:
+24     """Evaluates the trained model.
+25 
+26     Args:
+27         model (LogisticRegression): The trained logistic regression model.
+28         X_val: Validation data features.
+29         y_val: Validation data labels.
+30 
+31     Returns:
+32         Dict: A dictionary containing the evaluation metrics.
+33     """
+34     y_pred = model.predict(X_val)
+35     return {
+36         "accuracy": accuracy_score(y_val, y_pred),
+37         "precision": precision_score(y_val, y_pred),
+38         "recall": recall_score(y_val, y_pred),
+39         "f1_score": f1_score(y_val, y_pred),
+40     }
+
+```
+
+================================== Ai Message ==================================
+
+```bash
+#!/bin/bash
+
+pip install -r requirements.txt
+python src/main.py --data_path ./data.csv
+```
