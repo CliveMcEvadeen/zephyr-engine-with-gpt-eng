@@ -1,2 +1,5 @@
 .env
 .venv
+backup/
+    LLAMA-main.py
+    
