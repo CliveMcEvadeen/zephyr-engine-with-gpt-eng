@@ -106,6 +106,8 @@ def generate_report(benchmarks, benchmark_path):
         The path to the benchmark directory.
 
     """
+    
+    
 
     headers = ["Benchmark", "Ran", "Works", "Perfect", "Notes"]
     rows = []
