@@ -2,7 +2,7 @@
 Entrypoint for the CLI tool.
 
 This module serves as the entry point for a command-line interface (CLI) tool.
-It is designed to interact with OpenAI's language models.
+It is designed to interact with the Llama language model.
 The module provides functionality to:
 - Load necessary environment variables,
 - Configure various parameters for the AI interaction,
@@ -10,7 +10,7 @@ The module provides functionality to:
 
 Main Functionality
 ------------------
-- Load environment variables required for OpenAI API interaction.
+- Load environment variables required for Llama API interaction.
 - Parse user-specified parameters for project configuration and AI behavior.
 - Facilitate interaction with AI models, databases, and archival processes.
 
@@ -20,7 +20,7 @@ None
 
 Notes
 -----
-- The `GOOGLE_API_KEY` must be set in the environment or provided in a `.env` file within the working directory.
+- The `LLAMA_API_KEY` must be set in the environment or provided in a `.env` file within the working directory.
 - The default project path is `projects/example`.
 - When using the `azure_endpoint` parameter, provide the Azure OpenAI service endpoint URL.
 """
@@ -32,7 +32,6 @@ import sys
 
 from pathlib import Path
 
-import openai
 import typer
 
 from dotenv import load_dotenv
@@ -40,25 +39,25 @@ from langchain.globals import set_llm_cache
 from langchain_community.cache import SQLiteCache
 from termcolor import colored
 
-from gpt_engineer.applications.cli.cli_agent import CliAgent
-from gpt_engineer.applications.cli.collect import collect_and_send_human_review
-from gpt_engineer.applications.cli.file_selector import FileSelector
-from gpt_engineer.core.ai import AI, ClipboardAI
-from gpt_engineer.core.default.disk_execution_env import DiskExecutionEnv
-from gpt_engineer.core.default.disk_memory import DiskMemory
-from gpt_engineer.core.default.file_store import FileStore
-from gpt_engineer.core.default.paths import PREPROMPTS_PATH, memory_path
-from gpt_engineer.core.default.steps import (
+from llama_api.cli.cli_agent import CliAgent
+from llama_api.cli.collect import collect_and_send_human_review
+from llama_api.cli.file_selector import FileSelector
+from llama_api.core.ai import AI, ClipboardAI
+from llama_api.core.default.disk_execution_env import DiskExecutionEnv
+from llama_api.core.default.disk_memory import DiskMemory
+from llama_api.core.default.file_store import FileStore
+from llama_api.core.default.paths import PREPROMPTS_PATH, memory_path
+from llama_api.core.default.steps import (
     execute_entrypoint,
     gen_code,
     handle_improve_mode,
     improve_fn as improve_fn,
 )
-from gpt_engineer.core.files_dict import FilesDict
-from gpt_engineer.core.git import stage_uncommitted_to_git
-from gpt_engineer.core.preprompts_holder import PrepromptsHolder
-from gpt_engineer.core.prompt import Prompt
-from gpt_engineer.tools.custom_steps import clarified_gen, lite_gen, self_heal
+from llama_api.core.files_dict import FilesDict
+from llama_api.core.git import stage_uncommitted_to_git
+from llama_api.core.preprompts_holder import PrepromptsHolder
+from llama_api.core.prompt import Prompt
+from llama_api.tools.custom_steps import clarified_gen, lite_gen, self_heal
 
 app = typer.Typer(
     context_settings={"help_option_names": ["-h", "--help"]}
@@ -67,24 +66,18 @@ app = typer.Typer(
 
 def load_env_if_needed():
     """
-    Load environment variables if the GOOGLE_API_KEY is not already set.
+    Load environment variables if the LLAMA_API_KEY is not already set.
 
-    This function checks if the GOOGLE_API_KEY environment variable is set,
+    This function checks if the LLAMA_API_KEY environment variable is set,
     and if not, it attempts to load it from a .env file in the current working
-    directory. It then sets the openai.api_key for use in the application.
+    directory. It then sets the llama.api_key for use in the application.
     """
-    # We have all these checks for legacy reasons...
-    if os.getenv("GOOGLE_API_KEY") is None:
+    if os.getenv("LLAMA_API_KEY") is None:
         load_dotenv()
-    if os.getenv("GOOGLE_API_KEY") is None:
+    if os.getenv("LLAMA_API_KEY") is None:
         load_dotenv(dotenv_path=os.path.join(os.getcwd(), ".env"))
 
-    openai.api_key = os.getenv("GOOGLE_API_KEY")
-
-    if os.getenv("ANTHROPIC_API_KEY") is None:
-        load_dotenv()
-    if os.getenv("ANTHROPIC_API_KEY") is None:
-        load_dotenv(dotenv_path=os.path.join(os.getcwd(), ".env"))
+    os.environ["LLAMA_API_KEY"] = os.getenv("LLAMA_API_KEY")
 
 
 def concatenate_paths(base_path, sub_path):
@@ -133,7 +126,7 @@ def load_prompt(
     else:
         if not improve_mode:
             prompt_str = input(colored(
-                "\nWhat application do you want gpt-engineer to generate?\n"
+                "\nWhat application do you want llama-engineer to generate?\n"
             , 'green'))
         else:
             prompt_str = input("\nHow do you want to improve the application?\n")
@@ -239,7 +232,7 @@ def prompt_yesno() -> bool:
 
 @app.command(
     help="""
-        GPT-engineer lets you:
+        Llama-engineer lets you:
 
         \b
         - Specify a software in natural language
@@ -286,215 +279,152 @@ def main(
         "",
         "--azure",
         "-a",
-        help="""Endpoint for your Azure OpenAI Service (https://xx.openai.azure.com).
-            In that case, the given model is the deployment name chosen in the Azure AI Studio.""",
+        help="""Endpoint for your Azure OpenAI Service (https://xx.openai.azure.com)
+        Note: set environment variables LLAMA_API_KEY and AZURE_API_VERSION""",
     ),
-    use_custom_preprompts: bool = typer.Option(
+    human_review_mode: bool = typer.Option(
         False,
-        "--use-custom-preprompts",
-        help="""Use your project's custom preprompts instead of the default ones.
-          Copies all original preprompts to the project's workspace if they don't exist there.""",
+        "--human-review",
+        "-hr",
+        help="Human review mode - send generated content for human review before making changes.",
     ),
-    llm_via_clipboard: bool = typer.Option(
+    custom_preprompts: bool = typer.Option(
         False,
-        "--llm-via-clipboard",
-        help="Use the clipboard to communicate with the AI.",
-    ),
-    verbose: bool = typer.Option(
-        False, "--verbose", "-v", help="Enable verbose logging for debugging."
-    ),
-    debug: bool = typer.Option(
-        False, "--debug", "-d", help="Enable debug mode for debugging."
-    ),
-    prompt_file: str = typer.Option(
-        "prompt",
-        "--prompt_file",
-        help="Relative path to a text file containing a prompt.",
-    ),
-    entrypoint_prompt_file: str = typer.Option(
-        "",
-        "--entrypoint_prompt",
-        help="Relative path to a text file containing a file that specifies requirements for you entrypoint.",
+        "--custom-preprompts",
+        "-cp",
+        help="Use custom preprompts from the project's preprompts directory.",
     ),
     image_directory: str = typer.Option(
         "",
-        "--image_directory",
-        help="Relative path to a folder containing images.",
+        "--image-directory",
+        "-img",
+        help="Directory containing images relevant to the project.",
     ),
-    use_cache: bool = typer.Option(
-        False,
-        "--use_cache",
-        help="Speeds up computations and saves tokens when running the same prompt multiple times by caching the LLM response.",
+    prompt_file: str = typer.Option(
+        ".prompt",
+        "--prompt-file",
+        "-pf",
+        help="File containing the prompt for the AI to generate or improve the application.",
     ),
-    no_execution: bool = typer.Option(
-        False,
-        "--no_execution",
-        help="Run setup but to not call LLM or write any code. For testing purposes.",
+    entrypoint_prompt_file: str = typer.Option(
+        "",
+        "--entrypoint-prompt",
+        "-ep",
+        help="File containing the entrypoint prompt for the AI to start with.",
     ),
 ):
     """
-    The main entry point for the CLI tool that generates or improves a project.
-
-    This function sets up the CLI tool, loads environment variables, initializes
-    the AI, and processes the user's request to generate or improve a project
-    based on the provided arguments.
+    The main function to handle project initialization, AI configuration, and task execution.
 
     Parameters
     ----------
-    project_path : str
-        The file path to the project directory.
-    model : str
-        The model ID string for the AI.
-    temperature : float
-        The temperature setting for the AI's responses.
-    improve_mode : bool
-        Flag indicating whether to improve an existing project.
-    lite_mode : bool
-        Flag indicating whether to run in lite mode.
-    clarify_mode : bool
-        Flag indicating whether to discuss specifications with AI before implementation.
-    self_heal_mode : bool
-        Flag indicating whether to enable self-healing mode.
-    azure_endpoint : str
-        The endpoint for Azure OpenAI services.
-    use_custom_preprompts : bool
-        Flag indicating whether to use custom preprompts.
-    prompt_file : str
-        Relative path to a text file containing a prompt.
-    entrypoint_prompt_file: str
-        Relative path to a text file containing a file that specifies requirements for you entrypoint.
-    image_directory: str
-        Relative path to a folder containing images.
-    use_cache: bool
-        Speeds up computations and saves tokens when running the same prompt multiple times by caching the LLM response.
-    verbose : bool
-        Flag indicating whether to enable verbose logging.
-    no_execution: bool
-        Run setup but to not call LLM or write any code. For testing purposes.
-
-    Returns
-    -------
-    None
+    project_path : str, optional
+        The path to the project directory, by default ".".
+    model : str, optional
+        The model ID string to be used for AI interaction, by default the environment variable `MODEL_NAME` or "gemini-1.5-pro".
+    temperature : float, optional
+        The temperature setting for the AI model, by default 0.1.
+    improve_mode : bool, optional
+        Flag to indicate if the project is in improvement mode, by default False.
+    lite_mode : bool, optional
+        Flag to indicate if lite mode should be used, by default False.
+    clarify_mode : bool, optional
+        Flag to indicate if clarify mode should be used, by default False.
+    self_heal_mode : bool, optional
+        Flag to indicate if self-heal mode should be used, by default False.
+    azure_endpoint : str, optional
+        The endpoint for the Azure OpenAI service, by default "".
+    human_review_mode : bool, optional
+        Flag to indicate if human review mode should be used, by default False.
+    custom_preprompts : bool, optional
+        Flag to indicate if custom preprompts should be used, by default False.
+    image_directory : str, optional
+        Directory containing images relevant to the project, by default "".
+    prompt_file : str, optional
+        File containing the prompt for the AI to generate or improve the application, by default ".prompt".
+    entrypoint_prompt_file : str, optional
+        File containing the entrypoint prompt for the AI to start with, by default "".
     """
-
-    if debug:
-        import pdb
-
-        sys.excepthook = lambda *_: pdb.pm()
-
-    # Validate arguments
-    if improve_mode and (clarify_mode or lite_mode):
-        typer.echo("Error: Clarify and lite mode are not compatible with improve mode.")
-        raise typer.Exit(code=1)
-
-    # Set up logging
-    logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO)
-    if use_cache:
-        set_llm_cache(SQLiteCache(database_path=".langchain.db"))
-    if improve_mode:
-        assert not (
-            clarify_mode or lite_mode
-        ), "Clarify and lite mode are not active for improve mode"
 
     load_env_if_needed()
 
-    if llm_via_clipboard:
-        ai = ClipboardAI()
-    else:
-        ai = AI(
-            model_name=model,
-            temperature=temperature,
-            azure_endpoint=azure_endpoint,
+    set_llm_cache(SQLiteCache("llm_cache.db"))
+    if azure_endpoint:
+        print(
+            f"Using Azure OpenAI Service endpoint: {azure_endpoint}"
         )
 
-    path = Path(project_path)
-    print("Running gpt-engineer in", path.absolute(), "\n")
+    input_path = Path(project_path)
+    input_repo = DiskMemory(input_path)
+    input_files = FilesDict({key: input_repo.get(key) for key in input_repo.keys()})
 
-    prompt = load_prompt(
-        DiskMemory(path),
-        improve_mode,
-        prompt_file,
-        image_directory,
-        entrypoint_prompt_file,
+    agent = CliAgent(model=model, temperature=temperature, azure_endpoint=azure_endpoint)
+
+    preprompts_path = get_preprompts_path(custom_preprompts, input_path)
+    preprompts = PrepromptsHolder(preprompts_path)
+
+    ai = AI(
+        agent,
+        input_path,
+        preprompts,
+        image_directory=image_directory,
     )
 
-    # todo: if ai.vision is false and not llm_via_clipboard - ask if they would like to use gpt-4-vision-preview instead? If so recreate AI
-    if not ai.vision:
-        prompt.image_urls = None
-
-    # configure generation function
-    if clarify_mode:
-        code_gen_fn = clarified_gen
+    if improve_mode:
+        if lite_mode:
+            raise ValueError("--lite and --improve cannot be used together")
+        if clarify_mode:
+            raise ValueError("--clarify and --improve cannot be used together")
+        improve_fn(
+            input_repo,
+            input_files,
+            agent,
+            preprompts,
+            self_heal_mode=self_heal_mode,
+        )
+    elif clarify_mode:
+        clarified_gen(
+            input_repo,
+            input_files,
+            agent,
+            preprompts,
+            image_directory=image_directory,
+            human_review_mode=human_review_mode,
+        )
     elif lite_mode:
-        code_gen_fn = lite_gen
+        lite_gen(
+            input_repo,
+            input_files,
+            agent,
+            preprompts,
+            image_directory=image_directory,
+            human_review_mode=human_review_mode,
+        )
     else:
-        code_gen_fn = gen_code
+        prompt = load_prompt(
+            input_repo,
+            improve_mode,
+            prompt_file,
+            image_directory,
+            entrypoint_prompt_file,
+        )
+        output_repo = DiskExecutionEnv(
+            agent,
+            input_path,
+            preprompts,
+            self_heal_mode=self_heal_mode,
+        ).execute(prompt)
 
-    # configure execution function
-    if self_heal_mode:
-        execution_fn = self_heal
-    else:
-        execution_fn = execute_entrypoint
+        print(f"Generated code to {output_repo.path}")
+        stage_uncommitted_to_git(input_repo.path)
 
-    preprompts_holder = PrepromptsHolder(
-        get_preprompts_path(use_custom_preprompts, Path(project_path))
-    )
-
-    memory = DiskMemory(memory_path(project_path))
-    memory.archive_logs()
-
-    execution_env = DiskExecutionEnv()
-    agent = CliAgent.with_default_config(
-        memory,
-        execution_env,
-        ai=ai,
-        code_gen_fn=code_gen_fn,
-        improve_fn=improve_fn,
-        process_code_fn=execution_fn,
-        preprompts_holder=preprompts_holder,
-    )
-
-    files = FileStore(project_path)
-    if not no_execution:
-        if improve_mode:
-            files_dict_before, is_linting = FileSelector(project_path).ask_for_files()
-
-            # lint the code
-            if is_linting:
-                files_dict_before = files.linting(files_dict_before)
-
-            files_dict = handle_improve_mode(prompt, agent, memory, files_dict_before)
-            if not files_dict or files_dict_before == files_dict:
-                print(
-                    f"No changes applied. Could you please upload the debug_log_file.txt in {memory.path}/logs folder in a github issue?"
-                )
-
+        compare(input_files, FilesDict({key: output_repo.get(key) for key in output_repo.keys()}))
+        if human_review_mode:
+            print("Submit this change for human review?")
+            if prompt_yesno():
+                collect_and_send_human_review(output_repo)
             else:
-                print("\nChanges to be made:")
-                compare(files_dict_before, files_dict)
-
-                print()
-                print(colored("Do you want to apply these changes?", "light_green"))
-                if not prompt_yesno():
-                    files_dict = files_dict_before
-
-        else:
-            files_dict = agent.init(prompt)
-            # collect user feedback if user consents
-            config = (code_gen_fn.__name__, execution_fn.__name__)
-            collect_and_send_human_review(prompt, model, temperature, config, memory)
-
-        stage_uncommitted_to_git(path, files_dict, improve_mode)
-
-        files.push(files_dict)
-
-    if ai.token_usage_log.is_openai_model():
-        print("Total api cost: $ ", ai.token_usage_log.usage_cost())
-    elif os.getenv("LOCAL_MODEL"):
-        print("Total api cost: $ 0.0 since we are using local LLM.")
-    else:
-        print("Total tokens used: ", ai.token_usage_log.total_tokens())
-
+                print("Skipping human review.")
 
 if __name__ == "__main__":
     app()
